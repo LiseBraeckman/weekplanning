@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 import json
 import os
-from fpdf import FPDF
 
 # Instellingen
 st.set_page_config(layout="wide")
