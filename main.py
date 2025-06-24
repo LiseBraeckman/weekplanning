@@ -13,16 +13,17 @@ DB_PATH = "weekplanning_db.json"
 
 # Google Sheets toegang
 @st.cache_resource
-def to_dict(d):
-    if isinstance(d, dict):
-        return {k: to_dict(v) for k, v in d.items()}
-    elif isinstance(d, list):
-        return [to_dict(x) for x in d]
-    else:
-        return d
-
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    def to_dict(_d):
+        if isinstance(_d, dict):
+            return {k: to_dict(v) for k, v in _d.items()}
+        elif isinstance(_d, list):
+            return [to_dict(x) for x in _d]
+        else:
+            return _d
+    
     service_account_info = to_dict(st.secrets["gcp_service_account"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(service_account_info, scopes=scope)
     return gspread.authorize(creds)
