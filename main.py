@@ -15,7 +15,11 @@ DB_PATH = "weekplanning_db.json"
 @st.cache_resource
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(st.secrets["gcp_service_account"], scope)
+    service_account_info = dict(st.secrets["gcp_service_account"])  # <-- hier dict()
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        service_account_info,
+        scopes=scope
+    )
     return gspread.authorize(creds)
 
 @st.cache_data(ttl=300)
