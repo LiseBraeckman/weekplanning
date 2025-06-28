@@ -86,6 +86,12 @@ def save_planning_to_gsheet(week_key, planning):
     except Exception as e:
         st.warning(f"⚠️ Kon niet opslaan naar Google Sheets: {e}")
 
+def add_to_sheet(sheet_name, new_value):
+    client = get_gsheet_client()
+    sheet = client.open("Gezinsplanning").worksheet(sheet_name)
+    sheet.append_row([new_value])
+    st.cache_data.clear()
+
 def generate_daily_planning_with_randomness(dag, data, taak_planning_week, seed_offset=0):
     """Aangepaste versie met randomness voor variatie in planning"""
     
@@ -122,11 +128,10 @@ def generate_daily_planning_with_randomness(dag, data, taak_planning_week, seed_
         "eten": random.choice(eten_lijst),  # Random eten ipv gebaseerd op dag
         "taak_lise": taak_lise,
         "taak_cedric": taak_cedric,
-        "all": random.choice(act_lijst_cedric),     # Random activiteit
         "cedric": random.choice(act_lijst_cedric),  # Random activiteit
         "lise": random.choice(act_lijst_lise),      # Random activiteit
-        "lars": random.choice(act_lijst_kids),      # Random activiteit
-        "robbe": random.choice(act_lijst_kids),     # Random activiteit
+        "kids": random.choice(act_lijst_kids),      # Random activiteit
+        "all": random.choice(act_lijst_cedric),     # Random activiteit
     }
 
 def verdeel_taken_per_persoon_with_shuffle(taken_df, referentiedatum, personen, shuffle_seed=None):
@@ -149,6 +154,8 @@ def verdeel_taken_per_persoon_with_shuffle(taken_df, referentiedatum, personen, 
         return {
             'Wekelijks': delta >= 7,
             'Maandelijks': delta >= 30,
+            '3-maadelijks': delta >= 90,
+            'Half jaarlijks': delta >= 182,
             'Jaarlijks': delta >= 365,
             'Om de 5 jaar': delta >= 1825
         }.get(tijdseenheid, True)
@@ -193,16 +200,12 @@ def verdeel_taken_per_persoon_with_shuffle(taken_df, referentiedatum, personen, 
     
     return planning
 
-def wis_dagen_uit_json_en_cache(start_dag):
+def wis_dag_uit_json_en_cache(dag_key):
     """Verbeterde functie die ook session state reset"""
     db = load_db()
-    verwijderde_dagen = []
     
-    for i in range(7):
-        dag_key = (start_dag + timedelta(days=i)).strftime("%Y-%m-%d")
-        if dag_key in db:
-            db.pop(dag_key)
-            verwijderde_dagen.append(dag_key)
+    if dag_key in db:
+        db.pop(dag_key)
     
     save_db(db)
     
@@ -217,13 +220,23 @@ def wis_dagen_uit_json_en_cache(start_dag):
         st.session_state.planning_counter = 0
     st.session_state.planning_counter += 1
     
-    return verwijderde_dagen
+    return dag_key
 
 def save_planning_change(dag_key, field, new_value):
     """Helper functie om wijzigingen direct op te slaan"""
     if dag_key in st.session_state.db:
         st.session_state.db[dag_key][field] = new_value
         save_db(st.session_state.db)
+
+def hergenereer_dag(dag, data, taak_planning_week):
+    dag_key = dag.strftime("%Y-%m-%d")
+    nieuwe_planning = generate_daily_planning_with_randomness(
+        dag, data, taak_planning_week, seed_offset=random.randint(0, 99999)
+    )
+    st.session_state.db[dag_key] = nieuwe_planning
+    save_db(st.session_state.db)
+    st.success(f"🔄 Dag {dag.strftime('%A %d/%m')} hergegenereerd.")
+    st.rerun()
 
 # UI
 st.markdown("""
@@ -248,22 +261,9 @@ if st.checkbox("🔍 Debug informatie tonen"):
     for key in sorted(st.session_state.db.keys()):
         st.write(f"- {key}")
 
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns(2)
 with col1:
     start_dag = st.date_input("Startdatum weekplanning", value=datetime.today())
-with col2:
-    if st.button("🔄 Nieuwe planning genereren"):
-        with st.spinner("Bezig met genereren van nieuwe planning..."):
-            # Wis oude planning en reset cache
-            verwijderde_dagen = wis_dagen_uit_json_en_cache(start_dag)
-            
-            st.success(f"✅ Nieuwe planning gegenereerd!")
-            if verwijderde_dagen:
-                st.info(f"🗑️ Verwijderde planning voor: {', '.join(verwijderde_dagen)}")
-            else:
-                st.info("ℹ️ Geen bestaande planning gevonden, nieuwe planning wordt gegenereerd")
-        
-        st.rerun()
 
 if data:
     planning = []
@@ -311,15 +311,33 @@ if data:
             dag_key = (start_dag + timedelta(days=i)).strftime("%Y-%m-%d")
             st.markdown(f"**{dag_planning['dag_kort']}**")
         
-            # Eten selectie
+            # Eten selectie met optie om nieuw gerecht toe te voegen
+            eten_opties = data['eten'].iloc[:,0].tolist()
+            eten_opties.append("➕ Nieuw gerecht toevoegen...")
+
             current_eten = dag_planning['eten']
+            if current_eten not in eten_opties:
+                eten_opties.insert(0, current_eten)
+
             selected_eten = st.selectbox(
                 f"🍽️ Eten", 
-                options=data['eten'].iloc[:,0].tolist(), 
-                index=data['eten'].iloc[:,0].tolist().index(current_eten), 
+                options=eten_opties, 
+                index=eten_opties.index(current_eten),
                 key=f"eten_{i}"
             )
-            if selected_eten != current_eten:
+
+            if selected_eten == "➕ Nieuw gerecht toevoegen...":
+                nieuw_eten = st.text_input("Nieuw gerecht invullen:", key=f"nieuw_eten_{i}")
+                if st.button("✅ Toevoegen", key=f"toevoegen_eten_{i}") and nieuw_eten:
+                    if nieuw_eten not in eten_opties:
+                        add_to_sheet("Eten", nieuw_eten)
+                        st.success(f"'{nieuw_eten}' toegevoegd aan gerechten.")
+                        data['eten'] = load_all_sheets()['eten']  # reload data
+                        save_planning_change(dag_key, 'eten', nieuw_eten)
+                        st.rerun()
+                    else:
+                        st.info("ℹ️ Dit gerecht bestaat al.")
+            elif selected_eten != current_eten:
                 save_planning_change(dag_key, 'eten', selected_eten)
             
             st.markdown("---")
@@ -361,21 +379,9 @@ if data:
                         
             if dag_planning['taak_lise'] == "" and dag_planning['taak_cedric'] == "":
                 st.markdown(f"🧹 **Geen taak vandaag**")
+                st.markdown("")
+                st.markdown("")
         
-            st.markdown("---")
-        
-            # Activiteiten met helper functie
-            # Iedereen
-            current_all = dag_planning['all']
-            selected_all = st.selectbox(
-                f"👨‍👩‍👦‍👦 Iedereen", 
-                options=data['act_cedric']['Activiteiten'].tolist(), 
-                index=data['act_cedric']['Activiteiten'].tolist().index(current_all), 
-                key=f"all_{i}"
-            )
-            if selected_all != current_all:
-                save_planning_change(dag_key, 'all', selected_all)
-            
             st.markdown("---")
             
             # Cedric
@@ -400,32 +406,48 @@ if data:
             if selected_lise != current_lise:
                 save_planning_change(dag_key, 'lise', selected_lise)
             
-            # Lars
-            current_lars = dag_planning['lars']
-            selected_lars = st.selectbox(
-                f"👦 Lars", 
+            # Kids
+            current_kids = dag_planning['kids']
+            selected_kids = st.selectbox(
+                f"👦 Kids", 
                 options=data['act_kids']['Activiteiten'].tolist(), 
-                index=data['act_kids']['Activiteiten'].tolist().index(current_lars), 
-                key=f"lars_{i}"
+                index=data['act_kids']['Activiteiten'].tolist().index(current_kids), 
+                key=f"kids_{i}"
             )
-            if selected_lars != current_lars:
-                save_planning_change(dag_key, 'lars', selected_lars)
-            
-            # Robbe
-            current_robbe = dag_planning['robbe']
-            selected_robbe = st.selectbox(
-                f"👶 Robbe", 
-                options=data['act_kids']['Activiteiten'].tolist(), 
-                index=data['act_kids']['Activiteiten'].tolist().index(current_robbe), 
-                key=f"robbe_{i}"
+            if selected_kids != current_kids:
+                save_planning_change(dag_key, 'lars', selected_kids)
+
+             # Activiteiten met helper functie
+            # Iedereen
+            current_all = dag_planning['all']
+            selected_all = st.selectbox(
+                f"👨‍👩‍👦‍👦 Iedereen", 
+                options=data['act_cedric']['Activiteiten'].tolist(), 
+                index=data['act_cedric']['Activiteiten'].tolist().index(current_all), 
+                key=f"all_{i}"
             )
-            if selected_robbe != current_robbe:
-                save_planning_change(dag_key, 'robbe', selected_robbe)
+            if selected_all != current_all:
+                save_planning_change(dag_key, 'all', selected_all)
             
             st.markdown("---")
 
+            if st.button(f"🔄 Nieuwe dagplanning", key=f"regen_{i}"):
+                st.session_state[f"regen_{dag_key}"] = True
+                with st.spinner("Bezig met genereren van nieuwe planning..."):
+                    # Wis oude planning en reset cache
+                    verwijderde_dag = wis_dag_uit_json_en_cache(dag_key)
+                    
+                    st.success(f"✅ Nieuwe planning gegenereerd!")
+                    if verwijderde_dag:
+                        st.info(f"🗑️ Verwijderde planning voor: {verwijderde_dag}")
+                    else:
+                        st.info("ℹ️ Geen bestaande planning gevonden, nieuwe planning wordt gegenereerd")
+        
+                st.rerun()
+                st.session_state[f"regen_{dag_key}"] = False
+
     st.subheader("➕ Voeg nieuwe input toe")
-    col3, col4, col5 = st.columns(3)
+    col3, col4, col5, col6 = st.columns(4)
     with col3:
         nieuw_eten = st.text_input("Nieuw gerecht")
         if st.button("➕ Toevoegen aan Eten") and nieuw_eten:
@@ -435,7 +457,7 @@ if data:
                 st.info("ℹ️ Dit gerecht bestaat al.")
     with col4:
         nieuwe_taak = st.text_input("Nieuwe taak")
-        frequentie = st.selectbox("Frequentie:", ["Wekelijks", "Maandelijks", "Jaarlijks", "Om de 5 jaar"])
+        frequentie = st.selectbox("Frequentie:", ["Wekelijks", "Maandelijks", "Jaarlijks", "Half jaarlijks", "Om de 5 jaar"])
         effort = st.selectbox("Effort:", ["Laag", "Gemiddeld", "Hoog"])
         if st.button("➕ Toevoegen aan Taken") and nieuwe_taak:
             if not taak_bestaat_al(nieuwe_taak, data['taken']):
