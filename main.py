@@ -51,13 +51,13 @@ def load_all_sheets():
         return None
 
 def taak_bestaat_al(nieuwe_taak, taken_df):
-    return nieuwe_taak in taken_df['taak'].values
+    return nieuwe_taak in taken_df['Taak'].values
 
-def add_to_taken_sheet(nieuwe_taak, frequency, effort):
+def add_to_taken_sheet(nieuwe_taak, frequency, effort, person):
     try:
         client = get_gsheet_client()
         sheet = client.open("Gezinsplanning").worksheet("Taken")
-        sheet.append_row([nieuwe_taak, frequency, effort])
+        sheet.append_row([nieuwe_taak, frequency, effort, person])
         st.success(f"✅ '{nieuwe_taak}' toegevoegd aan Taken")
         st.cache_data.clear()
     except Exception as e:
@@ -265,6 +265,41 @@ col1, col2 = st.columns(2)
 with col1:
     start_dag = st.date_input("Startdatum weekplanning", value=datetime.today())
 
+with col2:
+        # nieuwe_taak = st.text_input("Nieuwe taak")
+        # frequentie = st.selectbox("Frequentie:", ["Wekelijks", "Maandelijks", "Jaarlijks", "Half jaarlijks", "Om de 5 jaar"])
+        # effort = st.selectbox("Effort:", ["Laag", "Gemiddeld", "Hoog"])
+        # if st.button("➕ Toevoegen aan Taken") and nieuwe_taak:
+        #     if not taak_bestaat_al(nieuwe_taak, data['taken']):
+        #         add_to_taken_sheet(nieuwe_taak, frequentie, effort)
+        #     else:
+        #         st.info("ℹ️ Deze taak bestaat al.")
+
+    if "taak_toevoegen_open" not in st.session_state:
+        st.session_state.taak_toevoegen_open = False
+
+    if st.button("➕ Taak toevoegen"):
+        st.session_state.taak_toevoegen_open = True
+
+    if st.session_state.taak_toevoegen_open:
+        with st.form("nieuwe_taak_formulier"):
+            nieuwe_taak = st.text_input("📝 Taaknaam")
+            frequentie = st.selectbox("📅 Frequentie", ["Wekelijks", "Maandelijks", "Jaarlijks", "Half jaarlijks", "Om de 5 jaar"])
+            effort = st.selectbox("⚡ Effort", ["Laag", "Gemiddeld", "Hoog"])
+            person= st.selectbox("👷🏻‍♂️ Wie", ["beiden", "Lise", "Cédric"])
+            submitted = st.form_submit_button("✅ Bevestigen")
+
+            if submitted:
+                if not taak_bestaat_al(nieuwe_taak, data['taken']):
+                    add_to_taken_sheet(nieuwe_taak, frequentie, effort, person)
+                    st.success(f"✅ '{nieuwe_taak}' toegevoegd aan Taken")
+                    st.cache_data.clear()
+                    data['taken'] = load_all_sheets()['taken']
+                    st.session_state.taak_toevoegen_open = False
+                    st.rerun()
+                else:
+                    st.info("ℹ️ Deze taak bestaat al.")
+
 if data:
     planning = []
     sheet_taken = get_gsheet_client().open("Gezinsplanning").worksheet("Taken")
@@ -313,16 +348,19 @@ if data:
         
             # Eten selectie met optie om nieuw gerecht toe te voegen
             eten_opties = data['eten'].iloc[:,0].tolist()
-            eten_opties.append("➕ Nieuw gerecht toevoegen...")
+            eten_opties.insert(0, "➕ Nieuw gerecht toevoegen...")
 
             current_eten = dag_planning['eten']
             if current_eten not in eten_opties:
                 eten_opties.insert(0, current_eten)
 
+            zoekterm = st.text_input("🔍 Zoek gerecht:", key=f"zoek_eten_{i}")
+            gefilterde_opties = [opt for opt in eten_opties if zoekterm.lower() in opt.lower()]
+
             selected_eten = st.selectbox(
-                f"🍽️ Eten", 
-                options=eten_opties, 
-                index=eten_opties.index(current_eten),
+                "🍽️ Eten",
+                options=gefilterde_opties,
+                index=0 if current_eten not in gefilterde_opties else gefilterde_opties.index(current_eten),
                 key=f"eten_{i}"
             )
 
@@ -446,28 +484,21 @@ if data:
                 st.rerun()
                 st.session_state[f"regen_{dag_key}"] = False
 
-    st.subheader("➕ Voeg nieuwe input toe")
-    col3, col4, col5, col6 = st.columns(4)
-    with col3:
-        nieuw_eten = st.text_input("Nieuw gerecht")
-        if st.button("➕ Toevoegen aan Eten") and nieuw_eten:
-            if nieuw_eten not in data['eten'].iloc[:,0].tolist():
-                add_to_sheet("Eten", nieuw_eten)
-            else:
-                st.info("ℹ️ Dit gerecht bestaat al.")
-    with col4:
-        nieuwe_taak = st.text_input("Nieuwe taak")
-        frequentie = st.selectbox("Frequentie:", ["Wekelijks", "Maandelijks", "Jaarlijks", "Half jaarlijks", "Om de 5 jaar"])
-        effort = st.selectbox("Effort:", ["Laag", "Gemiddeld", "Hoog"])
-        if st.button("➕ Toevoegen aan Taken") and nieuwe_taak:
-            if not taak_bestaat_al(nieuwe_taak, data['taken']):
-                add_to_taken_sheet(nieuwe_taak, frequentie, effort)
-            else:
-                st.info("ℹ️ Deze taak bestaat al.")
-    with col5:
-        nieuwe_activiteit = st.text_input("Nieuwe activiteit")
-        if st.button("➕ Toevoegen aan Activiteiten") and nieuwe_activiteit:
-            if nieuwe_activiteit not in data['activiteiten'].iloc[:,0].tolist():
-                add_to_sheet("Activiteiten", nieuwe_activiteit)
-            else:
-                st.info("ℹ️ Deze activiteit bestaat al.")
+    # st.subheader("➕ Voeg nieuwe input toe")
+    # col3, col4, col5, col6 = st.columns(4)
+    # with col4:
+    #     nieuwe_taak = st.text_input("Nieuwe taak")
+    #     frequentie = st.selectbox("Frequentie:", ["Wekelijks", "Maandelijks", "Jaarlijks", "Half jaarlijks", "Om de 5 jaar"])
+    #     effort = st.selectbox("Effort:", ["Laag", "Gemiddeld", "Hoog"])
+    #     if st.button("➕ Toevoegen aan Taken") and nieuwe_taak:
+    #         if not taak_bestaat_al(nieuwe_taak, data['taken']):
+    #             add_to_taken_sheet(nieuwe_taak, frequentie, effort)
+    #         else:
+    #             st.info("ℹ️ Deze taak bestaat al.")
+    # with col5:
+    #     nieuwe_activiteit = st.text_input("Nieuwe activiteit")
+    #     if st.button("➕ Toevoegen aan Activiteiten") and nieuwe_activiteit:
+    #         if nieuwe_activiteit not in data['activiteiten'].iloc[:,0].tolist():
+    #             add_to_sheet("Activiteiten", nieuwe_activiteit)
+    #         else:
+    #             st.info("ℹ️ Deze activiteit bestaat al.")
